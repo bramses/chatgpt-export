@@ -1,7 +1,6 @@
 const consoleSave = require("./util/consoleSave");
 const getTimestamp = require("./util/getTimestamp");
-const TurndownService = require('turndown').default;
-
+const TurndownService = require("turndown").default;
 
 /*
           child node example:
@@ -22,6 +21,21 @@ const TurndownService = require('turndown').default;
   markdown += `\`${timestamp}\`\n\n`;
   const turndownService = new TurndownService();
 
+  turndownService.addRule("code", {
+    filter: function (node) {
+      return node.nodeName === "CODE" || node.nodeName === "PRE";
+    },
+    replacement: function (content) {
+      // if content is valid json, format it
+      try {
+        const json = JSON.parse(content);
+        return "```json\n" + JSON.stringify(json, null, 2) + "\n```";
+      } catch (e) {
+        // otherwise, just return the content
+        return "```\n" + content + "\n```";
+      }
+    },
+  });
 
   for (var i = 0; i < elements.length; i++) {
     var ele = elements[i];
@@ -39,66 +53,81 @@ const TurndownService = require('turndown').default;
         markdown += `_ChatGPT_:\n`;
       }
 
+      let seenPlugin = false;
+
       // Parse child elements
       for (var n = 0; n < childNodes.length; n++) {
         const childNode = childNodes[n];
+
+        if (n == 0) {
+          // Prefix plugin label
+          markdown += `<hr>\n\n**GPT**:\n\n`;
+        }
 
         if (childNode.nodeType === Node.ELEMENT_NODE) {
           var tag = childNode.tagName;
           var text = childNode.textContent;
 
           // Plugins (e.g. "browsing")
-          if (childNode.parentNode.parentNode.previousSibling) {
+          if (childNode.parentNode.parentNode.previousSibling && !seenPlugin) {
             var pluginDiv = childNode.parentNode.parentNode.previousSibling;
             var pluginDivChildren = pluginDiv.childNodes;
 
             let pluginActivity = "";
             for (var p = 0; p < pluginDivChildren.length; p++) {
               const pluginDivChild = pluginDivChildren[p];
-
               console.log(pluginDivChild);
-              console.log(turndownService.turndown(pluginDivChild));
-              // console.log(turndownService.turndown(pluginDivChild));
-              const divs = pluginDivChild.querySelectorAll(".max-w-full .flex");
 
-              // Initialize an empty array to store the formatted Markdown content
-              const markdownLines = [];
+              // check if pluginDivChild has code descendant
+              if (pluginDivChild.querySelector("code") || pluginDivChild.querySelector("pre")) {
+                const mdVersion = turndownService.turndown(pluginDivChild);
+                pluginActivity += mdVersion + "\n";
+              } else {
 
-              // Loop through each div element and extract the relevant information
-              divs.forEach((div, index) => {
-                // Get the SVG element as a string, if it exists
-                const svgElement = div.querySelector("svg")?.outerHTML || "";
+                const divs = pluginDivChild.querySelectorAll(".max-w-full .flex");
 
-                // Get the text content, if it exists
-                const textContent =
-                  div.querySelector("div")?.textContent?.trim() || "";
+                // Initialize an empty array to store the formatted Markdown content
+                const markdownLines = [];
 
-                // Initialize a variable to store the formatted text content
-                let formattedTextContent = textContent;
+                // Loop through each div element and extract the relevant information
+                divs.forEach((div, index) => {
+                  // Get the SVG element as a string, if it exists
+                  const svgElement = div.querySelector("svg")?.outerHTML || "";
 
-                // Check if there is an anchor element (link) within the div
-                const anchorElement = div.querySelector("a");
-                if (anchorElement) {
-                  const linkText = anchorElement.textContent.trim();
-                  const linkHref = anchorElement.getAttribute("href");
-                  formattedTextContent = textContent.replace(
-                    linkText,
-                    `[${linkText}](${linkHref})`
+                  // Get the text content, if it exists
+                  const textContent =
+                    div.querySelector("div")?.textContent?.trim() || "";
+
+                  // Initialize a variable to store the formatted text content
+                  let formattedTextContent = textContent;
+
+                  // Check if there is an anchor element (link) within the div
+                  const anchorElement = div.querySelector("a");
+                  if (anchorElement) {
+                    const linkText = anchorElement.textContent.trim();
+                    const linkHref = anchorElement.getAttribute("href");
+                    formattedTextContent = textContent.replace(
+                      linkText,
+                      `[${linkText}](${linkHref})`
+                    );
+                  }
+
+                  // Format the content into Markdown and add it to the array
+                  markdownLines.push(
+                    `${index + 1}. ${svgElement} ${formattedTextContent}`
                   );
-                }
+                });
 
-                // Format the content into Markdown and add it to the array
-                markdownLines.push(
-                  `${index + 1}. ${svgElement} ${formattedTextContent}`
-                );
-              });
+                // Join the array into a single string
+                const markdownContent = markdownLines.join("\n");
 
-              // Join the array into a single string
-              const markdownContent = markdownLines.join("\n");
-
-              // Output the formatted Markdown content
-              console.log(markdownContent);
+                // Output the formatted Markdown content
+                pluginActivity += `${markdownContent}\n`;
+              }
             }
+
+            markdown += `${pluginActivity}\n`;
+            // seenPlugin = true;
           }
 
           // Code blocks
@@ -110,8 +139,14 @@ const TurndownService = require('turndown').default;
             markdown += `\`\`\`${codeBlockLang}\n${codeBlockData}\n\`\`\`\n`;
           }
 
+          // Images
+          else if (tag === "IMG") {
+            const imgSrc = childNode.getAttribute("src");
+            markdown += `![${imgSrc}](${imgSrc})\n`;
+          }
+
           // Tables
-          if (tag === "TABLE") {
+          else if (tag === "TABLE") {
             // Get table sections
             let tableMarkdown = "";
             childNode.childNodes.forEach((tableSectionNode) => {
@@ -158,6 +193,9 @@ const TurndownService = require('turndown').default;
               }
             });
             markdown += tableMarkdown;
+          } else {
+            const mdVersion = turndownService.turndown(childNode);
+            markdown += mdVersion;
           }
 
           // Paragraph break after each element
@@ -169,7 +207,7 @@ const TurndownService = require('turndown').default;
     // Text child
     if (firstChild.nodeType === Node.TEXT_NODE) {
       // Prefix User prompt label
-      markdown += `_Prompt_: \n`;
+      markdown += `<hr>\n\n**Bram**:\n\n`;
       markdown += `${firstChild.textContent}\n`;
 
       // End of prompt paragraphs breaks
