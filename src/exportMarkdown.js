@@ -127,7 +127,7 @@ const TurndownService = require("turndown").default;
             }
 
             markdown += `${pluginActivity}\n`;
-            // seenPlugin = true;
+            seenPlugin = true;
           }
 
           // Code blocks
